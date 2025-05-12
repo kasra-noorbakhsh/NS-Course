@@ -73,7 +73,7 @@ class MessengerClient:
 
         # Establish shared root key using own private and their public
         shared_secret = compute_dh(self.eg_keypair["private"], peer_pub)
-        salt = gen_random_salt()
+        salt = b"initial_ratchet_salt"
         root_key, send_chain_key = hkdf(shared_secret, salt, "ratchet")
 
         self.conns[name] = {
@@ -150,48 +150,50 @@ class MessengerClient:
                 raise ValueError("Missing certificate for user")
             peer_cert = self.certs[name]
             peer_pub = peer_cert["eg_pub"]
-            shared_secret = compute_dh(self.eg_keypair["private"], peer_pub)
-            salt = gen_random_salt()
-            root_key, recv_ck = hkdf(shared_secret, salt, "ratchet")
-            conn = self.conns[name] = {
-                "root_key": root_key,
+            conn = {
+                "root_key": None,
                 "send_ck": None,
-                "recv_ck": recv_ck,
+                "recv_ck": None,
                 "DHs": self.eg_keypair,
                 "DHr": peer_pub,
                 "Ns": 0, "Nr": 0, "PN": 0,
                 "skipped_keys": {}
             }
+            self.conns[name] = conn
 
+        # Handle DH ratchet if new public key is provided
         if "dh" in header and header["dh"] != conn["DHr"]:
-            if conn["Nr"] < header["pn"]:
-                for skipped in range(conn["Nr"], min(header["pn"], conn["Nr"] + 10)):
-                    if conn["recv_ck"] is None:
-                        break
-                    mk, conn["recv_ck"] = kdf_ck(conn["recv_ck"])
-                    conn["skipped_keys"][(conn["DHr"], skipped)] = mk
+            # Store previous chain state
             conn["PN"] = conn["Ns"]
+            conn["Ns"] = 0
             conn["Nr"] = 0
+            # Update DH public key
             conn["DHr"] = header["dh"]
+            # Perform DH key exchange
             dh_secret = compute_dh(conn["DHs"]["private"], conn["DHr"])
-            conn["root_key"], conn["recv_ck"] = hkdf(dh_secret, conn["root_key"], "ratchet")
+            # Derive new root key and receive chain key
+            conn["root_key"], conn["recv_ck"] = hkdf(dh_secret, conn["root_key"] or b"initial_ratchet_salt", "ratchet")
+        elif conn["recv_ck"] is None:
+            # Initial setup for first message if no DH key provided
+            dh_secret = compute_dh(conn["DHs"]["private"], conn["DHr"])
+            conn["root_key"], conn["recv_ck"] = hkdf(dh_secret, b"initial_ratchet_salt", "ratchet")
 
         n = header["n"]
-        mk = None
         sk_key = (conn["DHr"], n)
 
         if sk_key in conn["skipped_keys"]:
             mk = conn["skipped_keys"].pop(sk_key)
         else:
-            if conn["recv_ck"] is None:
-                # Attempt deriving recv_ck from DHs/private and current DHr
-                dh_secret = compute_dh(conn["DHs"]["private"], conn["DHr"])
-                conn["root_key"], conn["recv_ck"] = hkdf(dh_secret, conn["root_key"], "ratchet")
+            if n < conn["Nr"]:
+                raise ValueError("Message replay detected")
             if n - conn["Nr"] > 10:
                 raise ValueError("Too many skipped messages")
+            # Derive message keys for skipped messages
             while conn["Nr"] < n:
-                _, conn["recv_ck"] = kdf_ck(conn["recv_ck"])
+                mk, conn["recv_ck"] = kdf_ck(conn["recv_ck"])
+                conn["skipped_keys"][(conn["DHr"], conn["Nr"])] = mk
                 conn["Nr"] += 1
+            # Derive the message key for the current message
             mk, conn["recv_ck"] = kdf_ck(conn["recv_ck"])
             conn["Nr"] += 1
 
