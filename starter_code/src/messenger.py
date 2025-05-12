@@ -104,12 +104,13 @@ class MessengerClient:
 
         # DH ratchet with 10% chance
         include_dh = False
-        if random.random() < 0.1:
+        if random.random() < 0.1 or conn["Ns"] == 0:  # Force DH ratchet for first message
             include_dh = True
             conn["PN"] = conn["Ns"]
             conn["DHs"] = generate_eg()
             dh_secret = compute_dh(conn["DHs"]["private"], conn["DHr"])
-            conn["root_key"], conn["send_ck"] = hkdf(dh_secret, conn["root_key"], "ratchet")
+            conn["root_key"], conn["send_ck"] = hkdf(dh_secret, conn["root_key"] or b"initial_ratchet_salt", "ratchet")
+            conn["Ns"] = 0  # Reset Ns after DH ratchet
 
         # Derive message key
         mk, conn["send_ck"] = kdf_ck(conn["send_ck"])
@@ -163,11 +164,16 @@ class MessengerClient:
 
         # Handle DH ratchet if new public key is provided
         if "dh" in header and header["dh"] != conn["DHr"]:
-            # Store previous chain state
+            # Store previous chain state for skipped messages
+            if conn["recv_ck"] is not None:
+                # Save message keys for any skipped messages in the previous chain
+                for i in range(conn["Nr"], header["pn"]):
+                    mk, conn["recv_ck"] = kdf_ck(conn["recv_ck"])
+                    conn["skipped_keys"][(conn["DHr"], i)] = mk
+            # Update DH public key and reset chain state
             conn["PN"] = conn["Ns"]
             conn["Ns"] = 0
             conn["Nr"] = 0
-            # Update DH public key
             conn["DHr"] = header["dh"]
             # Perform DH key exchange
             dh_secret = compute_dh(conn["DHs"]["private"], conn["DHr"])
