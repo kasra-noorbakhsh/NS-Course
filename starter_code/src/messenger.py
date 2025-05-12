@@ -14,6 +14,7 @@ from lib import (
     hkdf,
     encrypt_with_gcm,
     decrypt_with_gcm,
+    kdf_ck,
 )
 import socket
 
@@ -64,7 +65,7 @@ class MessengerClient:
             None
         """
         if not verify_with_ecdsa(self.ca_public_key, str(certificate), signature):
-            raise ValueError("Invalid certificate signature")
+            raise ValueError("Tampering detected!")
 
         name = certificate["username"]
         self.certs[name] = certificate
@@ -145,7 +146,6 @@ class MessengerClient:
         conn = self.conns.get(name)
 
         if conn is None:
-            # New session: must know cert and shared root key
             if name not in self.certs:
                 raise ValueError("Missing certificate for user")
             peer_cert = self.certs[name]
@@ -153,7 +153,6 @@ class MessengerClient:
             shared_secret = compute_dh(self.eg_keypair["private"], peer_pub)
             salt = gen_random_salt()
             root_key, recv_ck = hkdf(shared_secret, salt, "ratchet")
-
             conn = self.conns[name] = {
                 "root_key": root_key,
                 "send_ck": None,
@@ -164,14 +163,13 @@ class MessengerClient:
                 "skipped_keys": {}
             }
 
-        # Handle DH ratchet
         if "dh" in header and header["dh"] != conn["DHr"]:
-            # Process skipped messages (up to 10)
             if conn["Nr"] < header["pn"]:
                 for skipped in range(conn["Nr"], min(header["pn"], conn["Nr"] + 10)):
+                    if conn["recv_ck"] is None:
+                        break
                     mk, conn["recv_ck"] = kdf_ck(conn["recv_ck"])
                     conn["skipped_keys"][(conn["DHr"], skipped)] = mk
-
             conn["PN"] = conn["Ns"]
             conn["Nr"] = 0
             conn["DHr"] = header["dh"]
@@ -180,12 +178,15 @@ class MessengerClient:
 
         n = header["n"]
         mk = None
-
-        # Try skipped keys first
         sk_key = (conn["DHr"], n)
+
         if sk_key in conn["skipped_keys"]:
             mk = conn["skipped_keys"].pop(sk_key)
         else:
+            if conn["recv_ck"] is None:
+                # Attempt deriving recv_ck from DHs/private and current DHr
+                dh_secret = compute_dh(conn["DHs"]["private"], conn["DHr"])
+                conn["root_key"], conn["recv_ck"] = hkdf(dh_secret, conn["root_key"], "ratchet")
             if n - conn["Nr"] > 10:
                 raise ValueError("Too many skipped messages")
             while conn["Nr"] < n:
