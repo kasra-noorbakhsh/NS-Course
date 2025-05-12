@@ -43,8 +43,12 @@ class MessengerClient:
         Returns:
             certificate: dict
         """
-        raise NotImplementedError("not implemented!")
-        certificate = {}
+        self.username = username
+        self.eg_keypair = generate_eg()  # Save private for later DH steps
+        certificate = {
+            "username": username,
+            "eg_pub": self.eg_keypair["public"]
+        }
         return certificate
 
 
@@ -59,7 +63,27 @@ class MessengerClient:
         Returns:
             None
         """
-        raise NotImplementedError("not implemented!")
+        if not verify_with_ecdsa(self.ca_public_key, str(certificate), signature):
+            raise ValueError("Invalid certificate signature")
+
+        name = certificate["username"]
+        self.certs[name] = certificate
+        peer_pub = certificate["eg_pub"]
+
+        # Establish shared root key using own private and their public
+        shared_secret = compute_dh(self.eg_keypair["private"], peer_pub)
+        salt = gen_random_salt()
+        root_key, send_chain_key = hkdf(shared_secret, salt, "ratchet")
+
+        self.conns[name] = {
+            "root_key": root_key,
+            "send_ck": send_chain_key,
+            "recv_ck": None,  # not known yet
+            "DHs": self.eg_keypair,
+            "DHr": peer_pub,
+            "Ns": 0, "Nr": 0, "PN": 0,
+            "skipped_keys": {}  # (dh_pub, msg_num) -> key
+        }
 
 
     def send_message(self, name: str, plaintext: str) -> tuple[dict, tuple[bytes, bytes]]:
@@ -73,9 +97,35 @@ class MessengerClient:
         Returns:
             (header, ciphertext): tuple(dict, tuple(bytes, bytes))
         """
-        raise NotImplementedError("not implemented!")
-        header = {}
-        ciphertext = ""
+        import random
+
+        conn = self.conns[name]
+
+        # DH ratchet with 10% chance
+        include_dh = False
+        if random.random() < 0.1:
+            include_dh = True
+            conn["PN"] = conn["Ns"]
+            conn["DHs"] = generate_eg()
+            dh_secret = compute_dh(conn["DHs"]["private"], conn["DHr"])
+            conn["root_key"], conn["send_ck"] = hkdf(dh_secret, conn["root_key"], "ratchet")
+
+        # Derive message key
+        mk, conn["send_ck"] = kdf_ck(conn["send_ck"])
+        iv = gen_random_salt()
+
+        ciphertext = encrypt_with_gcm(mk, plaintext, iv)
+
+        # Construct header
+        header = {
+            "pn": conn["PN"],
+            "n": conn["Ns"],
+            "iv": iv
+        }
+        if include_dh:
+            header["dh"] = conn["DHs"]["public"]
+
+        conn["Ns"] += 1
         return header, ciphertext
 
 
@@ -90,9 +140,61 @@ class MessengerClient:
         Returns:
             plaintext: str
         """
-        raise NotImplementedError("not implemented!")
-        header, ciphertext = message
-        plaintext = ""
+        header, ciphertext_info = message
+        iv = header["iv"]
+        conn = self.conns.get(name)
+
+        if conn is None:
+            # New session: must know cert and shared root key
+            if name not in self.certs:
+                raise ValueError("Missing certificate for user")
+            peer_cert = self.certs[name]
+            peer_pub = peer_cert["eg_pub"]
+            shared_secret = compute_dh(self.eg_keypair["private"], peer_pub)
+            salt = gen_random_salt()
+            root_key, recv_ck = hkdf(shared_secret, salt, "ratchet")
+
+            conn = self.conns[name] = {
+                "root_key": root_key,
+                "send_ck": None,
+                "recv_ck": recv_ck,
+                "DHs": self.eg_keypair,
+                "DHr": peer_pub,
+                "Ns": 0, "Nr": 0, "PN": 0,
+                "skipped_keys": {}
+            }
+
+        # Handle DH ratchet
+        if "dh" in header and header["dh"] != conn["DHr"]:
+            # Process skipped messages (up to 10)
+            if conn["Nr"] < header["pn"]:
+                for skipped in range(conn["Nr"], min(header["pn"], conn["Nr"] + 10)):
+                    mk, conn["recv_ck"] = kdf_ck(conn["recv_ck"])
+                    conn["skipped_keys"][(conn["DHr"], skipped)] = mk
+
+            conn["PN"] = conn["Ns"]
+            conn["Nr"] = 0
+            conn["DHr"] = header["dh"]
+            dh_secret = compute_dh(conn["DHs"]["private"], conn["DHr"])
+            conn["root_key"], conn["recv_ck"] = hkdf(dh_secret, conn["root_key"], "ratchet")
+
+        n = header["n"]
+        mk = None
+
+        # Try skipped keys first
+        sk_key = (conn["DHr"], n)
+        if sk_key in conn["skipped_keys"]:
+            mk = conn["skipped_keys"].pop(sk_key)
+        else:
+            if n - conn["Nr"] > 10:
+                raise ValueError("Too many skipped messages")
+            while conn["Nr"] < n:
+                _, conn["recv_ck"] = kdf_ck(conn["recv_ck"])
+                conn["Nr"] += 1
+            mk, conn["recv_ck"] = kdf_ck(conn["recv_ck"])
+            conn["Nr"] += 1
+
+        plaintext = decrypt_with_gcm(mk, ciphertext_info, iv)
         return plaintext
 
 
