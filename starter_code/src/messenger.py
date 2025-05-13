@@ -264,6 +264,7 @@ def receive_via_simulated_ipsec(bind_ip: str, bind_port: int) -> bytes:
         ciphertext = packet[4+iv_len:-16]  # Last 16 bytes are auth_tag
         auth_tag = packet[-16:]
         
-        # Decrypt with AES-GCM
-        plaintext = decrypt_with_gcm(STATIC_IPSEC_KEY, (ciphertext, auth_tag), iv)
+        # Decrypt with AES-GCM and convert string to bytes
+        plaintext_str = decrypt_with_gcm(STATIC_IPSEC_KEY, (ciphertext, auth_tag), iv)
+        plaintext = plaintext_str.encode('utf-8')  # Convert string to bytes
         return plaintext
