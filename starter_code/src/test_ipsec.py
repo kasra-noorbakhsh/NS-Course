@@ -13,12 +13,11 @@ class CustomTestResult(unittest.TestResult):
 
     def startTest(self, test):
         self.test_number += 1
-        print(f"{self.test_number}) Testing: {test._testMethodDoc.strip()}")
         super().startTest(test)
 
     def addSuccess(self, test):
         super().addSuccess(test)
-        print(f"{self.test_number}) Test passed: {test._testMethodDoc.strip()}")
+        print(f"\n{self.test_number}) Test passed: {test._testMethodDoc.strip()}")
 
     def addFailure(self, test, err):
         super().addFailure(test, err)
@@ -40,7 +39,6 @@ class TestIPsec(unittest.TestCase):
         self.client = MessengerClient(b"dummy_ca_key")
         self.bind_ip = "127.0.0.1"
         self.dest_ip = "127.0.0.1"
-        # Assign unique ports for each test
         self.ports = {
             'test_send_receive_ipsec': self._find_available_port(),
             'test_large_data_ipsec': self._find_available_port(),
@@ -51,7 +49,7 @@ class TestIPsec(unittest.TestCase):
     def _find_available_port(self):
         """Find an available port by binding and releasing a socket."""
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
-            s.bind(('127.0.0.1', 0))  # Let OS assign a free port
+            s.bind(('127.0.0.1', 0)) 
             return s.getsockname()[1]
 
     def test_send_receive_ipsec(self):
@@ -141,8 +139,7 @@ class TestIPsec(unittest.TestCase):
         receiver_thread.start()
         time.sleep(0.1)
         
-        # Create corrupted packet using a wrong key
-        wrong_key = hmac_to_aes_key(b"wrong_psk", "ipsec")  # Same derivation but different input
+        wrong_key = hmac_to_aes_key(b"wrong_psk", "ipsec") 
         iv = gen_random_salt()
         ciphertext, auth_tag = encrypt_with_gcm(wrong_key, test_data, iv)
         packet = struct.pack('!I', len(iv)) + iv + ciphertext + auth_tag
@@ -156,4 +153,4 @@ class TestIPsec(unittest.TestCase):
         self.assertIn("MAC check failed", str(received_data[0]), "Expected MAC check failure")
 
 if __name__ == '__main__':
-    unittest.main(testRunner=CustomTestRunner(verbosity=2))
+    unittest.main(testRunner=CustomTestRunner())
