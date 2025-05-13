@@ -97,7 +97,7 @@ class MessengerClient:
         include_dh = False
         if random.random() < 0.1 or conn["Ns"] == 0:
             include_dh = True
-            conn["PN"] = conn["Ns"]
+            conn["PN"] = conn["Ns"] if conn["Ns"] > 0 else 0
             conn["DHs"] = generate_eg()
             dh_secret = compute_dh(conn["DHs"]["private"], conn["DHr"])
             conn["root_key"], conn["send_ck"] = hkdf(dh_secret, conn["root_key"] or b"initial_ratchet_salt", "ratchet")
@@ -152,7 +152,7 @@ class MessengerClient:
             self.conns[name] = conn
 
         if "dh" in header and header["dh"] != conn["DHr"]:
-            if conn["recv_ck"] is not None:
+            if conn["recv_ck"] is not None and header["pn"] > conn["Nr"]:
                 for i in range(conn["Nr"], header["pn"]):
                     mk, conn["recv_ck"] = kdf_ck(conn["recv_ck"])
                     conn["skipped_keys"][(conn["DHr"], i)] = mk
