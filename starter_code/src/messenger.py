@@ -17,6 +17,7 @@ from lib import (
     kdf_ck,
 )
 import socket
+import struct
 
 
 class MessengerClient:
@@ -214,10 +215,55 @@ class MessengerClient:
 STATIC_IPSEC_KEY = hmac_to_aes_key(b"session_psk", "ipsec")
 
 def send_via_simulated_ipsec(dest_ip: str, dest_port: int, data: bytes):
-    iv = {}
-    # TO DO
+    """
+    Encrypt data using AES-GCM and send it over UDP to the destination.
+
+    Inputs:
+        dest_ip: str - Destination IP address
+        dest_port: int - Destination port
+        data: bytes - Data to encrypt and send
+
+    Returns:
+        None
+    """
+    # Generate random IV
+    iv = gen_random_salt()
+    
+    # Encrypt data with AES-GCM
+    ciphertext, auth_tag = encrypt_with_gcm(STATIC_IPSEC_KEY, data, iv)
+    
+    # Serialize packet: IV length (4 bytes), IV, ciphertext, auth_tag
+    iv_len = len(iv)
+    packet = struct.pack('!I', iv_len) + iv + ciphertext + auth_tag
+    
+    # Send over UDP
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+        sock.sendto(packet, (dest_ip, dest_port))
 
 def receive_via_simulated_ipsec(bind_ip: str, bind_port: int) -> bytes:
-    # TO DO
-    plaintext = {}
-    return plaintext
+    """
+    Listen on the given IP and port, receive a UDP packet, and decrypt it.
+
+    Inputs:
+        bind_ip: str - IP address to bind to
+        bind_port: int - Port to bind to
+
+    Returns:
+        plaintext: bytes - Decrypted data
+    """
+    # Create UDP socket and bind to address
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+        sock.bind((bind_ip, bind_port))
+        
+        # Receive packet
+        packet, _ = sock.recvfrom(65535)  # Buffer size for UDP
+        
+        # Deserialize packet: IV length (4 bytes), IV, ciphertext, auth_tag
+        iv_len = struct.unpack('!I', packet[:4])[0]
+        iv = packet[4:4+iv_len]
+        ciphertext = packet[4+iv_len:-16]  # Last 16 bytes are auth_tag
+        auth_tag = packet[-16:]
+        
+        # Decrypt with AES-GCM
+        plaintext = decrypt_with_gcm(STATIC_IPSEC_KEY, (ciphertext, auth_tag), iv)
+        return plaintext
