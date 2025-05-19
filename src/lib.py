@@ -1,33 +1,13 @@
-###############################################################################
-# Cryptographic Primitives
-#
-# All of the cryptographic functions you need for this assignment are contained
-# within this library.
-#
-# For your convenience, we have abstracted away all of the pesky underlying 
-# data types so that you can focus on building the messenger without getting 
-# caught up with conversions.
-#
-# Keys, hash outputs, ciphertexts, and signatures are all in bytes, and input
-# plaintexts are strings.
-# 
-# 
-# lib.py
-# Adapted into Python by Ari Glenn
-# Edited by Abolfazl Eslami
-###############################################################################
 from typing import Tuple
 
+import functools
 from Crypto.Cipher import AES
-from Crypto.Hash import HMAC, SHA256, SHA384
 from Crypto.PublicKey import ECC
 from Crypto.Signature import DSS
-from Crypto.Random import get_random_bytes
-from Crypto.Protocol.DH import key_agreement
 from Crypto.Protocol.KDF import HKDF
-import functools
-
-
+from Crypto.Random import get_random_bytes
+from Crypto.Hash import HMAC, SHA256, SHA384
+from Crypto.Protocol.DH import key_agreement
 
 def generate_eg() -> dict:
     """
@@ -38,8 +18,7 @@ def generate_eg() -> dict:
             public: bytes
             private: bytes
     """
-    key = ECC.generate(curve="P-384")
-    # Export keys in binary
+    key = ECC.generate(curve="P-384") # Export keys in binary
     return {"public": key.public_key().export_key(format="DER"), "private": key.export_key(format="DER")}
 
 def gen_random_salt(length: int = 16) -> bytes:
@@ -77,7 +56,7 @@ def verify_with_ecdsa(public_key: bytes, message: str, signature: bytes) -> bool
         return True
     except ValueError:
         return False
-    
+
 def encrypt_with_gcm(key: bytes, plaintext: str, iv: bytes, authenticated_data: str = "") -> Tuple[bytes, bytes]:
     """
     Encrypts using AES-GCM
@@ -222,8 +201,6 @@ def hkdf(input_key: bytes, salt: bytes, info_str: str) -> Tuple[bytes, bytes]:
     )
     return hkdf_out1, hkdf_out2
 
-
-
 def kdf_ck(ck: bytes) -> Tuple[bytes, bytes]:
     """
     Implements KDF_CK as per Double Ratchet spec.
@@ -238,12 +215,10 @@ def kdf_ck(ck: bytes) -> Tuple[bytes, bytes]:
     hmac1 = HMAC.new(ck, digestmod=SHA256)
     hmac1.update(b'\x01')
     message_key = hmac1.digest()
-
     # Next chain key = HMAC(ck, 0x02)
     hmac2 = HMAC.new(ck, digestmod=SHA256)
     hmac2.update(b'\x02')
     next_chain_key = hmac2.digest()
-
     return message_key, next_chain_key
 
 
@@ -255,6 +230,7 @@ def kdf_ck(ck: bytes) -> Tuple[bytes, bytes]:
 # ... but they may be helpful if you want to write additional tests for certificate
 # signatures in test_messenger.py
 ###############################################################################
+
 
 def generate_ecdsa() -> dict:
     """

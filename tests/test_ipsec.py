@@ -1,10 +1,17 @@
-import unittest
-import threading
+import os
+import sys
 import time
 import struct
 import socket
-from messenger import MessengerClient, send_via_simulated_ipsec, receive_via_simulated_ipsec
+import unittest
+import threading
+
+# Add the parent directory to sys.path
+parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'src'))
+sys.path.append(parent_dir)
+
 from lib import gen_random_salt, encrypt_with_gcm, hmac_to_aes_key
+from messenger import MessengerClient, send_via_simulated_ipsec, receive_via_simulated_ipsec
 
 class CustomTestResult(unittest.TestResult):
     def __init__(self, stream=None, descriptions=None, verbosity=None):
@@ -151,6 +158,7 @@ class TestIPsec(unittest.TestCase):
         self.assertIsNotNone(received_data[0], "No data received")
         self.assertIsInstance(received_data[0], ValueError, "Expected ValueError for corrupted data")
         self.assertIn("MAC check failed", str(received_data[0]), "Expected MAC check failure")
+
 
 if __name__ == '__main__':
     unittest.main(testRunner=CustomTestRunner())

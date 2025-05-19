@@ -1,18 +1,20 @@
+import random
+import struct
+import socket
+
 from lib import (
-    gen_random_salt,
-    generate_eg,
-    compute_dh,
-    verify_with_ecdsa,
-    hmac_to_aes_key,
-    hmac_to_hmac_key,
     hkdf,
+    kdf_ck,
+    compute_dh,
+    generate_eg,
+    gen_random_salt,
+    hmac_to_aes_key,
     encrypt_with_gcm,
     decrypt_with_gcm,
-    kdf_ck,
+    verify_with_ecdsa,
 )
-import socket
-import struct
 
+STATIC_IPSEC_KEY = hmac_to_aes_key(b"session_psk", "ipsec")
 
 class MessengerClient:
     def __init__(self, cert_authority_public_key: bytes):
@@ -22,8 +24,8 @@ class MessengerClient:
         of other users (see handout and receive_certificate)
         """
         self.ca_public_key = cert_authority_public_key
-        self.conns = {} 
-        self.certs = {} 
+        self.conns = {}
+        self.certs = {}
 
 
     def generate_certificate(self, username: str) -> dict:
@@ -90,7 +92,6 @@ class MessengerClient:
         Returns:
             (header, ciphertext): tuple(dict, tuple(bytes, bytes))
         """
-        import random
 
         conn = self.conns[name]
 
@@ -188,7 +189,10 @@ class MessengerClient:
         return plaintext
 
 
-STATIC_IPSEC_KEY = hmac_to_aes_key(b"session_psk", "ipsec")
+##################################################
+# Simulated IPsec Transport Layer For IPSec Part #
+##################################################
+
 
 def send_via_simulated_ipsec(dest_ip: str, dest_port: int, data: bytes):
     """
@@ -203,14 +207,15 @@ def send_via_simulated_ipsec(dest_ip: str, dest_port: int, data: bytes):
         None
     """
     iv = gen_random_salt()
-    
+
     ciphertext, auth_tag = encrypt_with_gcm(STATIC_IPSEC_KEY, data, iv)
-    
+
     iv_len = len(iv)
     packet = struct.pack('!I', iv_len) + iv + ciphertext + auth_tag
-    
+
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
         sock.sendto(packet, (dest_ip, dest_port))
+
 
 def receive_via_simulated_ipsec(bind_ip: str, bind_port: int) -> bytes:
     """
@@ -225,14 +230,14 @@ def receive_via_simulated_ipsec(bind_ip: str, bind_port: int) -> bytes:
     """
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
         sock.bind((bind_ip, bind_port))
-        
+
         packet, _ = sock.recvfrom(65535)  # Buffer size for UDP
-        
+
         iv_len = struct.unpack('!I', packet[:4])[0]
         iv = packet[4:4+iv_len]
         ciphertext = packet[4+iv_len:-16] 
         auth_tag = packet[-16:]
-        
+
         plaintext_str = decrypt_with_gcm(STATIC_IPSEC_KEY, (ciphertext, auth_tag), iv)
         plaintext = plaintext_str.encode('utf-8')
         return plaintext
