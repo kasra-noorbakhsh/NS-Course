@@ -10,7 +10,7 @@ This repository is for the Network Security course and hosts the Cryptographic M
 
   * `lib.py`: Provides cryptographic primitives including El Gamal key generation, AES-GCM encryption/decryption, Diffie-Hellman key exchange, HMAC, and HKDF functions.
   * `messenger.py`: Implements the `MessengerClient` class for generating certificates, sending/receiving encrypted messages, and simulating IPsec communication.
-  * `question_4_code.py`: Contains code to compare ECDSA and RSA performance for signing and verifying messages, aiding in answering Question 4.
+  * `timeEvaluator.py`: Contains code to compare ECDSA and RSA performance for signing and verifying messages, aiding in answering Question 4.
 
 * **tests**:
 
@@ -48,7 +48,6 @@ This repository is for the Network Security course and hosts the Cryptographic M
    ```bash
    cd tests
    python3 test_messenger.py
-   cd src
    python3 test_ipsec.py
    ```
 
